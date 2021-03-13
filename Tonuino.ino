@@ -6,6 +6,18 @@
 #include <SoftwareSerial.h>
 #include <avr/sleep.h>
 
+// display mod
+#include "SSD1306Ascii.h"
+#include "SSD1306AsciiAvrI2c.h"
+
+// 0X3C+SA0 - 0x3C or 0x3D
+#define I2C_ADDRESS 0x3C
+
+// Define proper RST_PIN if required.
+#define RST_PIN -1
+
+SSD1306AsciiAvrI2c oled;
+
 /*
    _____         _____ _____ _____ _____
   |_   _|___ ___|  |  |     |   | |     |
@@ -101,6 +113,7 @@ class Mp3Notify {
       //      Serial.print("Track beendet");
       //      Serial.println(track);
       //      delay(100);
+      
       nextTrack(track);
     }
     static void OnPlaySourceOnline(DfMp3_PlaySources source) {
@@ -148,8 +161,8 @@ void resetSettings() {
   mySettings.cookie = cardCookie;
   mySettings.version = 2;
   mySettings.maxVolume = 25;
-  mySettings.minVolume = 5;
-  mySettings.initVolume = 15;
+  mySettings.minVolume = 1;
+  mySettings.initVolume = 1;
   mySettings.eq = 1;
   mySettings.locked = false;
   mySettings.standbyTimer = 0;
@@ -221,6 +234,9 @@ void loadSettingsFromFlash() {
   Serial.print(mySettings.adminMenuPin[1]);
   Serial.print(mySettings.adminMenuPin[2]);
   Serial.println(mySettings.adminMenuPin[3]);
+
+  // display mod
+  //splash_screen((String) mySettings.initVolume, "");
 }
 
 class Modifier {
@@ -512,6 +528,9 @@ class FeedbackModifier: public Modifier {
 
 // Leider kann das Modul selbst keine Queue abspielen, daher müssen wir selbst die Queue verwalten
 static void nextTrack(uint16_t track) {
+  // led mod
+  rgb_on(0, 0, 0);
+  
   Serial.println(track);
   if (activeModifier != NULL)
     if (activeModifier->handleNext() == true)
@@ -528,6 +547,9 @@ static void nextTrack(uint16_t track) {
     return;
 
   Serial.println(F("=== nextTrack()"));
+
+  // display mod
+  splash_screen((String) volume, "");
 
   if (myFolder->mode == 1 || myFolder->mode == 7) {
     Serial.println(F("Hörspielmodus ist aktiv -> keinen neuen Track spielen"));
@@ -670,6 +692,9 @@ bool ignoreButtonFive = false;
 /// Funktionen für den Standby Timer (z.B. über Pololu-Switch oder Mosfet)
 
 void setstandbyTimer() {
+
+  
+  
   Serial.println(F("=== setstandbyTimer()"));
   if (mySettings.standbyTimer != 0)
     sleepAtMillis = millis() + (mySettings.standbyTimer * 60 * 1000);
@@ -719,6 +744,22 @@ void waitForTrackToFinish() {
 }
 
 void setup() {
+  // display mod
+  #if RST_PIN >= 0
+  oled.begin(&Adafruit128x32, I2C_ADDRESS, RST_PIN);
+#else // RST_PIN >= 0
+  oled.begin(&Adafruit128x32, I2C_ADDRESS);
+#endif // RST_PIN >= 0
+  // Call oled.setI2cClock(frequency) to change from the default frequency.
+
+  oled.setFont(Adafruit5x7);
+
+  uint32_t m = micros();
+
+  // led mod
+  //blink_status_led();
+  //pulse_status_led();
+  //rgb_on(128, 0, 0);
 
   Serial.begin(115200); // Es gibt ein paar Debug Ausgaben über die serielle Schnittstelle
 
@@ -789,6 +830,8 @@ void setup() {
     loadSettingsFromFlash();
   }
 
+  // led mod
+  pulse_status_led();
 
   // Start Shortcut "at Startup" - e.g. Welcome Sound
   playShortCut(3);
@@ -805,6 +848,7 @@ void readButtons() {
 }
 
 void volumeUpButton() {
+  
   if (activeModifier != NULL)
     if (activeModifier->handleVolumeUp() == true)
       return;
@@ -815,9 +859,15 @@ void volumeUpButton() {
     volume++;
   }
   Serial.println(volume);
+
+  // led mod
+  blink_status_led();
+  //blink_rgb(0, 130, 0);
+  splash_screen((String) volume, "");
 }
 
 void volumeDownButton() {
+  
   if (activeModifier != NULL)
     if (activeModifier->handleVolumeDown() == true)
       return;
@@ -828,6 +878,11 @@ void volumeDownButton() {
     volume--;
   }
   Serial.println(volume);
+
+  // led mod
+  blink_status_led();
+  //blink_rgb(0, 0, 128);
+  splash_screen((String) volume, "");
 }
 
 void nextButton() {
@@ -859,6 +914,12 @@ void playFolder() {
   Serial.print(F(" Dateien in Ordner "));
   Serial.println(myFolder->folder);
 
+  // led mod
+  //rgb_on(128, 128, 128);
+
+  // display mod
+  splash_screen((String) volume, (String) myFolder->folder + "/" + numTracksInFolder);
+  
   // Hörspielmodus: eine zufällige Datei aus dem Ordner
   if (myFolder->mode == 1) {
     Serial.println(F("Hörspielmodus -> zufälligen Track wiedergeben"));
@@ -1122,6 +1183,9 @@ void adminMenu(bool fromCard = false) {
   if (fromCard == false) {
     // Admin menu has been locked - it still can be trigged via admin card
     if (mySettings.adminMenuLocked == 1) {
+      knownCard = true;
+      mp3.start();
+      Serial.println(F("Menu locked - use a card"));
       return;
     }
     // Pin check
@@ -1804,4 +1868,63 @@ bool checkTwo ( uint8_t a[], uint8_t b[] ) {
     }
   }
   return true;
+}
+
+
+// led mod
+
+void blink_status_led() {
+  int led = 5;
+  pinMode(led, OUTPUT);
+  digitalWrite(led, LOW);
+  delay(100);
+  digitalWrite(led, HIGH);
+}
+
+void pulse_status_led() {
+  for (int in = 0; in <= 255; in++)
+  {
+    analogWrite(5,in);
+    delay(2);
+  }
+}
+
+// rgb led mod
+int red_light_pin= 6;
+int green_light_pin = 7;
+int blue_light_pin = 8;
+
+void blink_rgb(int red, int green, int blue) {
+  pinMode(red_light_pin, OUTPUT);
+  pinMode(green_light_pin, OUTPUT);
+  pinMode(blue_light_pin, OUTPUT);
+  RGB_color(red, green, blue);
+  rgb_on(128, 0, 0);
+}
+
+void rgb_on(int red, int green, int blue) {
+  RGB_color(red, green, blue);
+}
+
+void RGB_color(int red_light_value, int green_light_value, int blue_light_value) {
+  int red_light_pin= 6;
+  int green_light_pin = 7;
+  int blue_light_pin = 8;
+  analogWrite(red_light_pin, red_light_value);
+  analogWrite(green_light_pin, green_light_value);
+  analogWrite(blue_light_pin, blue_light_value);
+}
+
+// display mod
+void splash_screen(String volume, String track) {
+  String spacer = "       ";
+  oled.clear();
+  // first row
+  oled.println("JURIS");
+  // second row
+  oled.set2X();
+  oled.println("TonUINO");
+  // third row
+  oled.set1X();
+  oled.println("Vol:" + volume + spacer + track);
 }
